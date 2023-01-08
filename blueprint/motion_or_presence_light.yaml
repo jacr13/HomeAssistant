@@ -1,0 +1,325 @@
+blueprint:
+  name: Motion/Presence-activated Light
+  description:
+    "Turn on light with different brightness or temperature, depending if you are in night or day mode.
+    The automation can be triggered by two types of triggers (motion or presence sensor).\n
+    \n
+    Options:\n
+    - Specify time to enter night or day mode\n
+    - Choose the brightness level when in night or day mode\n
+    - Choose the temperature level when in night or day mode\n
+    - Specify an illuminance sensor that will only turn on light if illuminance level bellow threshold\n
+    - Specify an illuminance threshold (light only turn on if illuminance bellow it)\n
+    - Specify a waiting time before turning off the light (wait time for day and night mode)\n
+    This amount of time should be bigger than the time the motion sensor takes to become available again, so if triggered the automation will restart and light will stay on when you are in the room\n
+    - Specify a block entity that will prevent the automation to turn on or off the light (is usually a input_boolean created)\n
+    - Specify a helper entity, this is a input_datetime, that should only be used by this automation to keep in memory the timestamp when the light was changed.\n
+    This will prevent the automation to turn off the light if the light was changed by a switch/phone/...\n
+    For example, if the light turn on when you enter the kitchen, you can simply say to your voice assistant to augment the brightness, change the temperature of your light to make it stay on.\n
+    "
+  domain: automation
+  input:
+    motion_entity:
+      name: Motion Sensor (or Presence Sensor Required)
+      description: Motion or Presence Sensor are required. You can specify both.
+      default:
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+          multiple: false
+    presence_entity:
+      name: Presence Sensor
+      description: Motion or Presence Sensor are required. You can specify both.
+      default:
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: presence
+          multiple: false
+    light_target:
+      name: Light
+      selector:
+        target:
+          entity:
+            domain: light
+    on_night_time:
+      name: (Required) On Time Night
+      description: The time when the night mode starts.
+      default: "22:30:00"
+      selector:
+        time: {}
+    off_night_time:
+      name: (Optional) Off Time Night
+      description: The time when the night mode ends.
+      default: "07:00:00"
+      selector:
+        time: {}
+    day_brightness:
+      name: (Optional) Day brightness
+      description: Brightness, in day mode
+      default: 100
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    night_brightness:
+      name: (Optional) Night brightness
+      description: Brightness, in night mode
+      default: 20
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    day_temp:
+      name: (Optional) Day temperature
+      description: Temperature, in daytime mode
+      default: 320
+      selector:
+        color_temp: {}
+    night_temp:
+      name: (Optional) Night temperature
+      description: Temperature, in night mode
+      default: 410
+      selector:
+        color_temp: {}
+    illuminance_sensor:
+      name: (Optional) Illuminance sensor
+      description: The illuminance sensor to get lux data.
+      default:
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+          multiple: false
+    illuminance_cutoff:
+      name: (Optional) Illuminance threshold
+      description:
+        The threshold to compare to the current illumination (lux above
+        this value will NOT turn on the light).
+      default:
+      selector:
+        number:
+          min: 0.0
+          max: 200.0
+          unit_of_measurement: lx
+          mode: slider
+          step: 1.0
+    no_motion_wait_delay_day:
+      name: Wait time day
+      description:
+        "Time to leave the light on after detecting the last movement for
+        daytime mode (default: 120 seconds)."
+      default: 120
+      selector:
+        number:
+          min: 0.0
+          max: 3600.0
+          unit_of_measurement: seconds
+          mode: slider
+          step: 1.0
+    no_motion_wait_delay_night:
+      name: Wait time night
+      description:
+        "Time to leave the light on after detecting the last movement in
+        night mode (default: 120 seconds)."
+      default: 120
+      selector:
+        number:
+          min: 0.0
+          max: 3600.0
+          unit_of_measurement: seconds
+          mode: slider
+          step: 1.0
+    bool_block_entity:
+      name: (Optional) Block entity
+      default:
+      description:
+        If this sensor is "on" your are in manual mode and the automation will not run.
+        You need to create an input_boolean in configuration.yaml or in helpers (Devives & Services > helpers).
+      selector:
+        entity:
+          domain: input_boolean
+          multiple: false
+    lastupdated_helper_entity:
+      name: (Optional) Last Updated helper entity
+      default:
+      description:
+        This sensor allows you to keep in memory the timestamp the light was changed by the automation. It will prevent the light to turn off if it was changed by another entity (phone, switch, etc).
+        You need to create an input_datetime (with has_time and has_date to true) in configuration.yaml or in helpers (Devives & Services > helpers).
+      selector:
+        entity:
+          domain: input_datetime
+          multiple: false
+
+mode: restart
+max_exceeded: silent
+
+trigger_variables:
+  motion_entity: !input motion_entity
+  presence_entity: !input presence_entity
+
+variables:
+  light_target: !input light_target
+  on_night_time: !input on_night_time
+  off_night_time: !input off_night_time
+  day_brightness: !input day_brightness
+  night_brightness: !input night_brightness
+  day_temp: !input day_temp
+  night_temp: !input night_temp
+  illuminance_sensor: !input illuminance_sensor
+  illuminance_cutoff: !input illuminance_cutoff
+  no_motion_wait_delay_day: !input no_motion_wait_delay_day
+  no_motion_wait_delay_night: !input no_motion_wait_delay_night
+  bool_block_entity: !input bool_block_entity
+  lastupdated_helper_entity: !input lastupdated_helper_entity
+
+trigger:
+  - platform: template
+    value_template: >
+      {% if motion_entity != none %}
+        {{ state_attr(motion_entity, 'occupancy') }}
+      {% endif %}
+  - platform: template
+    value_template: >
+      {% if presence_entity != none %}
+        {{
+          state_attr(presence_entity, 'presence')
+        }}
+      {% endif %}
+
+condition:
+  - condition: template
+    # condidion to accept trigger if :
+    # light is on and light was not updated/changed by any other entity
+    value_template: >
+      {% if 'entity_id' in light_target  and lastupdated_helper_entity != none %}
+        {% if light_target['entity_id'] is string %}
+          {% set light = light_target['entity_id'] %}
+        {% else  %}
+          {% set light = light_target['entity_id'][0] %}
+        {% endif %}
+
+        {{ not (
+            is_state(light, 'on')
+            and states[lastupdated_helper_entity].attributes.timestamp != as_timestamp(states[light].last_updated)
+          )
+        }}
+      {% else  %}
+        true
+      {% endif %}
+  - condition: template
+    # condidion to accept trigger if :
+    # 1. or illuminance sensor is none
+    # 2. or illuminance cutoff is none
+    # 3. or illuminance value bellow cutoff
+    value_template: >
+      {% if 'entity_id' in light_target %}
+        {% if light_target['entity_id'] is string %}
+          {% set light = light_target['entity_id'] %}
+        {% else  %}
+          {% set light = light_target['entity_id'][0] %}
+        {% endif %}
+
+        {% if is_state(light, 'off') %}
+          {{
+            (illuminance_sensor == none)
+            or (illuminance_cutoff == none)
+            or (states[illuminance_sensor].state | int < illuminance_cutoff | int)
+          }}
+        {% else %}
+          true
+        {% endif %}
+      {% else %}
+        true
+      {% endif %}
+  - condition: template
+    # condition to accept trigger if :
+    # 1. block entity is none
+    # 2. or block entity state is off (false)
+    value_template: "{{
+      (bool_block_entity == none)
+      or (states[bool_block_entity].state == 'off')
+      }}"
+
+action:
+  - alias: Turn on the light
+    service: light.turn_on
+    target: !input light_target
+    data:
+      brightness_pct: >
+        {% if now().strftime("%H:%M") > on_night_time[0:5]
+              or now().strftime("%H:%M") < off_night_time[0:5] %}
+          {{ night_brightness }}
+        {% else  %}
+          {{ day_brightness }}
+        {% endif %}
+      color_temp: >
+        {% if now().strftime("%H:%M") > on_night_time[0:5]
+              or now().strftime("%H:%M") < off_night_time[0:5] %}
+          {{ night_temp }}
+        {% else  %}
+          {{ day_temp }}
+        {% endif %}
+  - alias: Wait 3 seconds to make sure state is updated correctly
+    delay: 3
+  - alias: Register the time we updated the target light
+    service: input_datetime.set_datetime
+    target:
+      entity_id: !input lastupdated_helper_entity
+    data:
+      timestamp: >
+        {% if 'entity_id' in light_target %}
+          {% if light_target['entity_id'] is string %}
+            {% set light = light_target['entity_id'] %}
+          {% else  %}
+            {% set light = light_target['entity_id'][0] %}
+          {% endif %}
+          {{ as_timestamp(states[light].last_updated) }}
+        {% else %}
+          {{ 0 }}
+        {% endif %}
+  - alias: Wait until there is no motion from device
+    wait_for_trigger:
+      - platform: template
+        value_template: >
+          {% if motion_entity != none %}
+            {{ not state_attr(motion_entity, 'occupancy') }}
+          {% endif %}
+      - platform: template
+        value_template: >
+          {% if presence_entity != none %}
+            {{ not state_attr(presence_entity, 'presence') }}
+          {% endif %}
+  - alias: Wait the number of seconds that has been set
+    delay: >
+      {% if now().strftime("%H:%M") > on_night_time[0:5]
+            or now().strftime("%H:%M") < off_night_time[0:5] %}
+        {{ no_motion_wait_delay_night }}
+      {% else  %}
+        {{ no_motion_wait_delay_day }}
+      {% endif %}
+  - condition: template
+    value_template: "{{
+      (bool_block_entity == none)
+      or (states[bool_block_entity].state == 'off')
+      }}"
+  - condition: template
+    value_template: >
+      {% if 'entity_id' in light_target and lastupdated_helper_entity != none %}
+        {% if light_target['entity_id'] is string %}
+          {% set light = light_target['entity_id'] %}
+        {% else  %}
+          {% set light = light_target['entity_id'][0] %}
+        {% endif %}
+        {{ states[lastupdated_helper_entity].attributes.timestamp == as_timestamp(states[light].last_updated) }}
+      {% else %}
+        true
+      {% endif %}
+  - alias: Turn off the light
+    service: light.turn_off
+    target: !input light_target
